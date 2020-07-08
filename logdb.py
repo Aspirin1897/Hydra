@@ -153,6 +153,5 @@ if __name__ == "__main__":
     db = LogDB()
     db.get_logdb()
     print(db.get_string_id('1594111612')) #找不到这个id的异常处理
-    db.find_oprt_id_via_string('usnkegs')
-    print(db.get_cmd_result('1415191169'))
+    print(db.find_oprt_id_via_string('1594111612','usnkegs'))
 

@@ -52,6 +52,7 @@ class VplxDrbd(object):
     def _get_drbd_init_cmd(self):
         unique_str = 'usnkegs'
         print(consts.get_value('ID'))
+        print(consts.get_value('LOG_SWITCH'))
         if _RPL == 'no':
             oprt_id = s.get_oprt_id()
             cmd_drbd_init = f'drbdadm create-md {self.res_name}'

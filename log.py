@@ -2,12 +2,14 @@
 import logging
 import logging.handlers
 import logging.config
+import consts
 from functools import wraps
 import traceback
 import sys
 import os
 import getpass
 import socket
+
 
 
 
@@ -32,6 +34,7 @@ class Log(object):
 
     def __init__(self,transaction_id):
         self.transaction_id = transaction_id
+        # self.log_switch = consts.get_value('LOG_SWITCH')
         # self.time = None
         # self.type1 = None
         # self.type2 = None
@@ -58,9 +61,13 @@ class Log(object):
 
 
     # write to log file
-    def write_to_log(self,display,type1,type2,describe1,describe2,data):
+    def write_to_log(self,display,type1,type2,describe1,describe2,data,LOG_SWITCH='ON'):
         logger_hydra = self.logger_create()
-        # logger_hydra.logger.removeHandler(self.handler_input)
+
+        # if consts.get_value('LOG_SWITCH') == 'OFF':
+        #     logger_hydra.logger.removeHandler(self.handler_input)
+
+
         logger_hydra.debug(
             '',
             extra={
