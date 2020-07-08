@@ -47,8 +47,8 @@ class ConnSSH(object):
 
 
 
-    def execute_command(self, command):
-        oprt_id = s.get_oprt_id()
+    def execute_command(self, command, oprt_id):
+        # oprt_id = s.get_oprt_id()
         # self.logger.write_to_log('T','OPRT','cmd','ssh',oprt_id,command)
         stdin, stdout, stderr = self.SSHConnection.exec_command(command)
         data = stdout.read()
