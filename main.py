@@ -20,6 +20,8 @@ class HydraArgParse():
         self.transaction_id = sundry.get_transaction_id()
         self.logger = log.Log(self.transaction_id)
         self.argparse_init()
+        consts._init() #初始化一个全局变量：ID
+        
 
     def argparse_init(self):
         self.parser = argparse.ArgumentParser(prog='max_lun',
@@ -77,13 +79,16 @@ class HydraArgParse():
     def execute(self, id, string):
         self.transaction_id = sundry.get_transaction_id()
         self.logger = log.Log(self.transaction_id)
-
+        self.logger.write_to_log('F','DATA','STR','Start a new trasaction','',f'{id}')
+        self.logger.write_to_log('F','DATA','STR','unique_str','',f'{string}')
+        # self.logger.write_to_log('F','DATA','ID','','Start a new trasaction')
         print(f'\n======*** Start working for ID {id} ***======')
 
         #初始化一个全局变量ID
         
-        vplx.ID = id
-        vplx.STRING = string
+        vplx._ID = id
+        vplx._STR = string
+        vplx._RPL = 'no'
         self._vplx_drbd()
 
 
@@ -114,18 +119,15 @@ class HydraArgParse():
             if args.transactionid:
                 db = logdb.LogDB()
                 db.get_logdb()
-                string_,id_ = db.get_string_id(args.transactionid)[0]
+                _string,_id = db.get_string_id(args.transactionid)
 
                 vplx._RPL = 'yes'
                 print(f'\n======*** Start working for ID {id} ***======')
 
-                consts._init()#初始化一个全局变量：ID
-
                 vplx._TID = args.transactionid
 
-
-                vplx._ID = id_
-                vplx._STR = string_
+                vplx._ID = _id
+                vplx._STR = _string
                 self._vplx_drbd()
                 time.sleep(1.5)
 

@@ -99,8 +99,8 @@ class LogDB():
 
 
     def find_oprt_id_via_string(self,transaction_id,string):
-        # id_now = consts.get_value('ID')
-        id_now = 20
+        id_now = consts.get_value('ID')
+        # id_now = 20
         sql = f"SELECT id,describe2 FROM logtable WHERE data = '{string}' and id > {id_now} and transaction_id = '{transaction_id}'"
         id_and_oprt_id = self.sql_fetch_one(sql)
         # sql = f"SELECT describe2 FROM logtable WHERE id = '{db_id}' "
@@ -108,10 +108,18 @@ class LogDB():
         return id_and_oprt_id
 
     def get_string_id(self,transaction_id):
-        sql = f"SELECT data FROM logtable WHERE data LIKE('%Start to create lun, name%') and transaction_id = '{transaction_id}'"
-        result = self.sql_fetch_one(sql)
-        re_ = re.compile(r'Start to create lun, name: (.*)_(.*)')
-        return re_.findall(result[0])
+        sql = f"SELECT data FROM logtable WHERE describe1 = 'Start a new trasaction' and transaction_id = '{transaction_id}'"
+        _id = self.sql_fetch_one(sql)
+        if _id:
+            _id = _id[0]
+        sql = f"SELECT data FROM logtable WHERE describe1 = 'unique_str' and transaction_id = '{transaction_id}'"
+        string = self.sql_fetch_one(sql)
+        if string:
+            string = string[0]
+
+        return (string, _id)
+        # re_ = re.compile(r'Start to create lun, name: (.*)_(.*)')
+        # return re_.findall(result[0])
 
     def get_data_via_id(self,id):
         sql = f"SELECT data FROM logtable WHERE id = '{id}' and display = 'T' and type1 = 'INFO'"
