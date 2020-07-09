@@ -54,14 +54,14 @@ class ConnSSH(object):
         data = stdout.read()
         if len(data) > 0:
             output = {'sts':1, 'rst':data}
-            self.logger.write_to_log('F','DATA','cmd','ssh',oprt_id,output)
+            # self.logger.write_to_log('F','DATA','cmd','ssh',oprt_id,output)
             return output
 
         err = stderr.read()
         if len(err) > 0:
             output = {'sts':0, 'rst':err}
             self.logger.write_to_log('T','INFO','warning','failed','',f'  Command "{command}" execute failed')
-            self.logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, output)
+            # self.logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, output)
             return output
         if data == b'':
             output = {'sts': 1, 'rst': data}

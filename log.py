@@ -64,8 +64,8 @@ class Log(object):
     def write_to_log(self,display,type1,type2,describe1,describe2,data,LOG_SWITCH='ON'):
         logger_hydra = self.logger_create()
 
-        # if consts.get_value('LOG_SWITCH') == 'OFF':
-        #     logger_hydra.logger.removeHandler(self.handler_input)
+        if consts.get_value('LOG_SWITCH') == 'OFF':
+            logger_hydra.logger.removeHandler(self.handler_input)
 
 
         logger_hydra.debug(

@@ -123,7 +123,6 @@ class HydraArgParse():
 
                 vplx._RPL = 'yes'
                 print(f'\n======*** Start working for ID {id} ***======')
-
                 consts._init()#初始化一个全局变量：ID
                 consts.set_value('LOG_SWITCH','OFF')
                 print('LOG_SWITCH:',consts.get_value('LOG_SWITCH'))

@@ -99,9 +99,9 @@ class LogDB():
 
 
     def find_oprt_id_via_string(self,transaction_id,string):
-        id_now = consts.get_value('ID')
-        # id_now = 20
-        sql = f"SELECT id,describe2 FROM logtable WHERE data = '{string}' and id > {id_now} and transaction_id = '{transaction_id}'"
+        # id_now = consts.get_value('ID')
+        id_now = 20
+        sql = f"SELECT id,data FROM logtable WHERE describe1 = '{string}' and id > {id_now} and transaction_id = '{transaction_id}'"
         id_and_oprt_id = self.sql_fetch_one(sql)
         # sql = f"SELECT describe2 FROM logtable WHERE id = '{db_id}' "
         # oprt_id = self.sql_fetch_one(sql)
@@ -161,5 +161,7 @@ if __name__ == "__main__":
     db = LogDB()
     db.get_logdb()
     print(db.get_string_id('1594111612')) #找不到这个id的异常处理
-    print(db.find_oprt_id_via_string('1594111612','usnkegs'))
+    print(db.find_oprt_id_via_string('1594201691','_drdb_up'))
+    print(db.get_cmd_result('1418052969'))
+    print(db.get_string_id(1594201691))
 

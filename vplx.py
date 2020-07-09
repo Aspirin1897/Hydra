@@ -38,52 +38,65 @@ def discover_new_lun(logger, cmd_rescan):
     '''
     Scan and find the disk from NetApp
     '''
-    init_ssh(logger)
-    logger.write_to_log('T', 'INFO', 'info', 'start', '',
-                        f'  Discover_new_lun for id {_ID}')
-    # self.logger.write_to_log('INFO','info','',f'start to discover_new_lun for id {ID}')
-    result_rescan = SSH.execute_command(cmd_rescan,787878)
-    # print(result_rescan)
-    if result_rescan['sts']:
-        cmd_lsscsi = 'lsscsi'
-        result_lsscsi = SSH.execute_command(cmd_lsscsi, 787878)
-        if result_lsscsi['sts']:
-            result_lsscsi = result_lsscsi['rst'].decode('utf-8')
-        else:
-            print(f'command {cmd_lsscsi} execute failed')
-            logger.write_to_log('T', 'INFO', 'warning', 'start',
-                                '', f'command {cmd_lsscsi} execute failed')
-        # log DAT:output:cmd:lsscsi:result_lsscsi
-    # if SSH.execute_command('/usr/bin/rescan-scsi-bus.sh'):#新的返回值有状态和数值,以状态判断,记录数值
-    #     result_lsscsi = SSH.execute_command('lsscsi')
-    else:
-        s.pwe(logger, f'Scan new LUN failed on NetApp')
-    re_find_id_dev = r'\:(\d*)\].*NETAPP[ 0-9a-zA-Z._]*(/dev/sd[a-z]{1,3})'
-    blk_dev_name = s.get_disk_dev(
-        str(_ID), re_find_id_dev, result_lsscsi, 'NetApp', logger)
 
-    print(f'Find device {blk_dev_name} for LUN id {_ID}')
-    logger.write_to_log('T', 'INFO', 'info', 'finish', '',
-                        f'    Find device {blk_dev_name} for LUN _ {_ID}')
-    # self.logger.write_to_log('INFO', 'info', '', f'Find device {blk_dev_name} for LUN id {ID}')
-    return blk_dev_name
+    if _RPL == 'no':
+        oprt_id = s.get_oprt_id()
+        init_ssh(logger)
+        logger.write_to_log('T', 'INFO', 'info', 'start', '',
+                            f'  Discover_new_lun for id {_ID}')
+        # self.logger.write_to_log('INFO','info','',f'start to discover_new_lun for id {ID}')
+        logger.write_to_log('T','OPRT','cmd','ssh',oprt_id,cmd_rescan)
+        result_rescan = SSH.execute_command(cmd_rescan,787878)
+        logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, result_rescan)
+
+        # print(result_rescan)
+        if result_rescan['sts']:
+            cmd_lsscsi = 'lsscsi'
+            result_lsscsi = SSH.execute_command(cmd_lsscsi, 787878)
+            if result_lsscsi['sts']:
+                result_lsscsi = result_lsscsi['rst'].decode('utf-8')
+            else:
+                print(f'command {cmd_lsscsi} execute failed')
+                logger.write_to_log('T', 'INFO', 'warning', 'start',
+                                    '', f'command {cmd_lsscsi} execute failed')
+            # log DAT:output:cmd:lsscsi:result_lsscsi
+        # if SSH.execute_command('/usr/bin/rescan-scsi-bus.sh'):#新的返回值有状态和数值,以状态判断,记录数值
+        #     result_lsscsi = SSH.execute_command('lsscsi')
+        else:
+            s.pwe(logger, f'Scan new LUN failed on NetApp')
+        re_find_id_dev = r'\:(\d*)\].*NETAPP[ 0-9a-zA-Z._]*(/dev/sd[a-z]{1,3})'
+        blk_dev_name = s.get_disk_dev(
+            str(_ID), re_find_id_dev, result_lsscsi, 'NetApp', logger)
+
+        print(f'Find device {blk_dev_name} for LUN id {_ID}')
+        logger.write_to_log('T', 'INFO', 'info', 'finish', '',
+                            f'    Find device {blk_dev_name} for LUN _ {_ID}')
+        # self.logger.write_to_log('INFO', 'info', '', f'Find device {blk_dev_name} for LUN id {ID}')
+        return blk_dev_name
+
+    elif _RPL == 'yes':
+        blk_dev_name = {'sts': 1, 'rst': b''}
+        return blk_dev_name
 
 
 def retry_rescan(logger):
-    cmd_rescan = '/usr/bin/rescan-scsi-bus.sh'
-    blk_dev_name = discover_new_lun(logger, cmd_rescan)
-    # print(blk_dev_name)
-    if blk_dev_name:
-        return blk_dev_name
-    else:
-        print('Rescanning...')
-        cmd_rescan = '/usr/bin/rescan-scsi-bus.sh -a'
+    if _RPL == 'no':
+        cmd_rescan = '/usr/bin/rescan-scsi-bus.sh'
         blk_dev_name = discover_new_lun(logger, cmd_rescan)
+        # print(blk_dev_name)
         if blk_dev_name:
             return blk_dev_name
         else:
-            s.pwe(logger, 'Did not find the new LUN from Netapp,program exit...')
-
+            print('Rescanning...')
+            cmd_rescan = '/usr/bin/rescan-scsi-bus.sh -a'
+            blk_dev_name = discover_new_lun(logger, cmd_rescan)
+            if blk_dev_name:
+                return blk_dev_name
+            else:
+                s.pwe(logger, 'Did not find the new LUN from Netapp,program exit...')
+    elif _RPL == 'yes':
+        blk_dev_name = {'sts': 1, 'rst': b''}
+        return blk_dev_name
 
 class VplxDrbd(object):
     '''
@@ -95,9 +108,11 @@ class VplxDrbd(object):
         self.res_name = f'res_{_STR}_{_ID}'
         global DRBD_DEV_NAME
         DRBD_DEV_NAME = f'drbd{_ID}'
+        print(1)
         self.blk_dev_name = retry_rescan(logger)
+        print(2)
         self.logger = logger
-        init_ssh(self.logger)
+        # init_ssh(self.logger)
         self.logger.write_to_log('T', 'INFO', 'info', 'start', '', 'Start to configure DRDB resource and crm resource on VersaPLX')
         self.logger.write_to_log('T','INFO','info','start','',f'    Start to configure DRBD resource {self.res_name}')
     
@@ -131,28 +146,32 @@ class VplxDrbd(object):
         #     else:
         #         s.pe('fail to prepare drbd config file..')
         config_file_name = f'{self.res_name}.res'
-        for i in range(len(context)):
-            if i == 0:
-                echo_result = SSH.execute_command(
-                    f'echo {context[i]} > /etc/drbd.d/{config_file_name}', 787878)
-            else:
-                echo_result = SSH.execute_command(
-                    f'echo {context[i]} >> /etc/drbd.d/{config_file_name}', 787878)
-            # result of ssh command like (1,'done'),1 for status, 'done' for data.
-            if echo_result['sts']:
-                continue
-            else:
-                # print('fail to prepare drbd config file..')
-                # [time],[transaction_id],[display],[type_level1],[type_level2],[d1],[d2],[data]
-                # [time],[transaction_id],[s],[INFO],[error],[exit],[d2],['fail to prepare drbd config file..']
-                # ??? oprt
-                s.pwe(self.logger, 'fail to prepare drbd config file..')
-                # sys.exit()
+        if _RPL == 'no':
+            for i in range(len(context)):
+                if i == 0:
+                    echo_result = SSH.execute_command(
+                        f'echo {context[i]} > /etc/drbd.d/{config_file_name}', 787878)
+                else:
+                    echo_result = SSH.execute_command(
+                        f'echo {context[i]} >> /etc/drbd.d/{config_file_name}', 787878)
+                # result of ssh command like (1,'done'),1 for status, 'done' for data.
+                if echo_result['sts']:
+                    continue
+                else:
+                    # print('fail to prepare drbd config file..')
+                    # [time],[transaction_id],[display],[type_level1],[type_level2],[d1],[d2],[data]
+                    # [time],[transaction_id],[s],[INFO],[error],[exit],[d2],['fail to prepare drbd config file..']
+                    # ??? oprt
+                    s.pwe(self.logger, 'fail to prepare drbd config file..')
+                    # sys.exit()
 
-                # s.pwe(self.logger,'fail to prepare drbd config file..')
-        print(f'create DRBD config file "{self.res_name}.res" done')
-        self.logger.write_to_log('T', 'INFO', 'info', 'finish', '',
-                                 f'      Create DRBD config file "{self.res_name}.res" done')
+                    # s.pwe(self.logger,'fail to prepare drbd config file..')
+            print(f'create DRBD config file "{self.res_name}.res" done')
+            self.logger.write_to_log('T', 'INFO', 'info', 'finish', '',
+                                     f'      Create DRBD config file "{self.res_name}.res" done')
+
+        elif _RPL == 'yes':
+            pass
         # [time],[transaction_id],[display],[INFO],[info],[finish],[d2],[data]
         # self.logger.write_to_log('INFO','info','',f'Create DRBD config file "{self.res_name}.res" done')
 
