@@ -6,7 +6,18 @@ import time
 import sys
 import os
 import re
+import logdb
+import consts
 
+# global SSH
+SSH = None
+
+
+
+# global _ID
+# global _STR
+# global _RPL
+# global _TID
 
 host = '10.203.1.199'
 port = 22
@@ -14,11 +25,109 @@ user = 'root'
 password = 'password'
 timeout = 3
 
-
-
 target_iqn = "iqn.2020-06.com.example:test-max-lun"
 initiator_iqn = "iqn.1993-08.org.debian:01:885240c2d86c"
 target_name = 't_test'
+
+
+def init_ssh(logger):
+    global SSH
+    if not SSH:
+        SSH = connect.ConnSSH(host, port, user, password, timeout, logger)
+    else:
+        pass
+
+
+def discover_new_lun(logger, cmd_rescan):
+    '''
+    Scan and find the disk from NetApp
+    '''
+    init_ssh(logger)
+    oprt_id = s.get_oprt_id()
+    logger.write_to_log('T', 'INFO', 'info', 'start', '', f'  Discover_new_lun for id {consts.get_id()}')
+    # self.logger.write_to_log('INFO','info','',f'start to discover_new_lun for id {ID}')
+    logger.write_to_log('T', 'OPRT', 'cmd', 'ssh', oprt_id, cmd_rescan)
+    result_rescan = SSH.execute_command(cmd_rescan)
+    logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, result_rescan)
+    # print(result_rescan)
+    if result_rescan['sts']:
+        oprt_id = s.get_oprt_id()
+        cmd_lsscsi = 'lsscsi'
+        logger.write_to_log('T', 'OPRT', 'cmd', 'ssh', oprt_id, cmd_lsscsi)
+        result_lsscsi = SSH.execute_command(cmd_lsscsi)
+        logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, result_lsscsi)
+        if result_lsscsi['sts']:
+            result_lsscsi = result_lsscsi['rst'].decode('utf-8')
+        else:
+            print(f'command {cmd_lsscsi} execute failed')
+            logger.write_to_log('T', 'INFO', 'warning', 'start',
+                                '', f'command {cmd_lsscsi} execute failed')
+        # log DAT:output:cmd:lsscsi:result_lsscsi
+    # if SSH.execute_command('/usr/bin/rescan-scsi-bus.sh'):#新的返回值有状态和数值,以状态判断,记录数值
+    #     result_lsscsi = SSH.execute_command('lsscsi')
+    else:
+        s.pwe(logger, f'Scan new LUN failed on NetApp')
+    re_find_id_dev = r'\:(\d*)\].*NETAPP[ 0-9a-zA-Z._]*(/dev/sd[a-z]{1,3})'
+    blk_dev_name = s.get_disk_dev(
+        str(consts.get_id()), re_find_id_dev, result_lsscsi, 'NetApp', logger)
+
+    print(f'  Find device {blk_dev_name} for LUN id {consts.get_id()}')
+    logger.write_to_log('T', 'INFO', 'info', 'finish', '',
+                        f'    Find device {blk_dev_name} for LUN _ {consts.get_id()}')
+    # self.logger.write_to_log('INFO', 'info', '', f'Find device {blk_dev_name} for LUN id {ID}')
+    return blk_dev_name
+
+
+def retry_rescan(logger):
+    cmd_rescan = '/usr/bin/rescan-scsi-bus.sh'
+    blk_dev_name = discover_new_lun(logger, cmd_rescan)
+    if blk_dev_name:
+        return blk_dev_name
+    else:
+        print('Rescanning...')
+        cmd_rescan = '/usr/bin/rescan-scsi-bus.sh -a'
+        blk_dev_name = discover_new_lun(logger, cmd_rescan)
+        if blk_dev_name:
+            return blk_dev_name
+        else:
+            s.pwe(logger, 'Did not find the new LUN from Netapp,program exit...')
+
+
+def get_ssh_cmd(logger, unique_str, cmd, oprt_id):
+    _RPL = consts.get_rpl()
+    if _RPL == 'no':
+        logger.write_to_log('F', 'DATA', 'STR', unique_str, '', oprt_id)
+        logger.write_to_log('T', 'OPRT', 'cmd', 'ssh', oprt_id, cmd)
+        result_cmd = SSH.execute_command(cmd)
+        logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, result_cmd)
+        if result_cmd['sts']:
+            return result_cmd['rst'].decode('utf-8')
+        else:
+            print('execute drbd init command failed')
+    elif _RPL == 'yes':
+        db = logdb.LogDB()
+        db_id, oprt_id = db.find_oprt_id_via_string(consts.get_tid(), unique_str)
+        # now_id = consts.get_value('ID')
+        # print(f'DB ID now is : {now_id}')
+        # print(f'  DB ID go to: {db_id}')
+        # print(f'  get opration ID: {oprt_id}')
+        info_start = db.get_info_start(oprt_id)
+        if info_start:
+            print(info_start)
+        result_cmd = db.get_cmd_result(oprt_id)
+        if result_cmd:
+            result_cmd = eval(result_cmd)
+            if result_cmd['sts']:
+                result = result_cmd['rst'].decode('utf-8')
+            else:
+                result = None
+                print('execute drbd init command failed')
+        info_end = db.get_info_finish(oprt_id)
+        if info_end:
+            print(info_end)
+        s.change_pointer(db_id)
+        # print(f'  Change DB ID to: {db_id}')
+        return result
 
 
 class VplxDrbd(object):
@@ -26,51 +135,37 @@ class VplxDrbd(object):
     Integrate LUN in DRBD resources
     '''
 
-    def __init__(self, unique_id, unique_name,logger):
+    def __init__(self, logger):
         self.logger = logger
-        self.ssh = connect.ConnSSH(host, port, user, password, timeout,logger)
-        self.id = unique_id
-        self.res_name = f'res_{unique_name}_{unique_id}'
-        self.blk_dev_name = None
-        self.drbd_device_name = f'drbd{unique_id}'
+        self._STR = consts.get_str()
+        self._ID = consts.get_id()
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', '',
+                                 'Start to configure DRDB resource and crm resource on VersaPLX')
+        print('Start to config DRBD resource...')
+        self.res_name = f'res_{self._STR}_{self._ID}'
+        global DRBD_DEV_NAME
+        DRBD_DEV_NAME = f'drbd{self._ID}'
+        _RPL = consts.get_rpl()
+        if _RPL == 'no':
+            init_ssh(self.logger)
+            self.blk_dev_name = retry_rescan(logger)
 
-    # def _find_blk_dev(self, id, ls_result):
-    #     '''
-    #     Use re to get the blk_dev_name through id
-    #     '''
-    #     re_vplx_id_path = re.compile(
-    #         r'''\:(\d*)\].*NETAPP[ 0-9a-zA-Z._]*(/dev/sd[a-z]{1,3})''')
-    #     stor_result = re_vplx_id_path.findall(ls_result)
-    #     if stor_result:
-    #         dict_stor = dict(stor_result)
-    #         if str(id) in dict_stor.keys():
-    #             blk_dev_name = dict_stor[str(id)]
-    #             return blk_dev_name
-
-    def discover_new_lun(self):
-        '''
-        Scan and find the disk from NetApp
-        '''
-
-        lsscsi_result = None
-        if self.ssh.excute_command('/usr/bin/rescan-scsi-bus.sh'):
-            lsscsi_result = self.ssh.excute_command('lsscsi')
-        else:
-            self.logger.write_to_log('VplxDrbd','print','discover_new_lun',(f'Scan new LUN failed on NetApp'))
-            s.pe(f'Scan new LUN failed on NetApp')
-        re_find_id_dev = r'\:(\d*)\].*NETAPP[ 0-9a-zA-Z._]*(/dev/sd[a-z]{1,3})'
-        self.blk_dev_name = s.GetDiskPath(self.id, re_find_id_dev, lsscsi_result, 'NetApp',self.logger).explore_disk()
-        print(f'Find device {self.blk_dev_name} for LUN id {self.id}')
-        self.logger.write_to_log('VplxDrbd', 'print', 'discover_new_lun', (f'Find device {self.blk_dev_name} for LUN id {self.id}'))
-            
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', '',
+                                 f'    Start to configure DRBD resource {self.res_name}')
 
     def prepare_config_file(self):
         '''
         Prepare DRDB resource config file
         '''
+        _RPL = consts.get_rpl()
+        if _RPL == 'yes':
+            return
+
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', '',
+                                 f'      Start prepare config fiel for resource {self.res_name}')
         context = [rf'resource {self.res_name} {{',
                    rf'\ \ \ \ on maxluntarget {{',
-                   rf'\ \ \ \ \ \ \ \ device /dev/{self.drbd_device_name}\;',
+                   rf'\ \ \ \ \ \ \ \ device /dev/{DRBD_DEV_NAME}\;',
                    rf'\ \ \ \ \ \ \ \ disk {self.blk_dev_name}\;',
                    rf'\ \ \ \ \ \ \ \ address 10.203.1.199:7789\;',
                    rf'\ \ \ \ \ \ \ \ node-id 0\;',
@@ -78,8 +173,14 @@ class VplxDrbd(object):
                    r'\ \ \ \}',
                    r'}']
 
+        # self.logger.write_to_log('DATA','input','context',context)
+        # [time],[transaction_id],[display],[type_level1],[type_level2],[d1],[d2],[data]
+        # [time],[transaction_id],[-],[DATA],[value],[list],['content of drbd config file'],[data]
+        self.logger.write_to_log(
+            'F', 'DATA', 'value', 'list', 'content of drbd config file', context)
+
         # for echo_command in context:
-        #     echo_result = self.ssh.excute_command(
+        #     echo_result = SSH.execute_command(
         #         f'echo {echo_command} >> /etc/drbd.d/{self.res_name}.res')
         #     if echo_result is True:
         #         continue
@@ -88,201 +189,260 @@ class VplxDrbd(object):
         config_file_name = f'{self.res_name}.res'
         for i in range(len(context)):
             if i == 0:
-                echo_result = self.ssh.excute_command(
-                    f'echo {context[i]} > /etc/drbd.d/{self.res_name}.res')
+                # logger.write_to_log('T', 'OPRT', 'cmd', 'ssh', oprt_id, cmd_rescan)
+                echo_result = SSH.execute_command(
+                    f'echo {context[i]} > /etc/drbd.d/{config_file_name}')
+                # logger.write_to_log('T', 'OPRT', 'cmd', 'ssh', oprt_id, cmd_rescan) 输出
             else:
-                echo_result = self.ssh.excute_command(
-                    f'echo {context[i]} >> /etc/drbd.d/{self.res_name}.res')
-            if echo_result is True:
-                self.logger.write_to_log('VplxDrbd','continue','echo_result',True)
+                echo_result = SSH.execute_command(
+                    f'echo {context[i]} >> /etc/drbd.d/{config_file_name}')
+            # result of ssh command like (1,'done'),1 for status, 'done' for data.
+            if echo_result['sts']:
                 continue
             else:
-                self.logger.write_to_log('VplxDrbd','print','prepare_config_file',('fail to prepare drbd config file..'))
-                s.pe('fail to prepare drbd config file..')
-        self.logger.write_to_log('VplxDrbd','print','prepare_config_file',(f'Create DRBD config file "{self.res_name}.res" done'))
-        print(f'Create DRBD config file "{self.res_name}.res" done')
+                # print('fail to prepare drbd config file..')
+                # [time],[transaction_id],[display],[type_level1],[type_level2],[d1],[d2],[data]
+                # [time],[transaction_id],[s],[INFO],[error],[exit],[d2],['fail to prepare drbd config file..']
+                # ??? oprt
+                s.pwe(self.logger, 'fail to prepare drbd config file..')
+                # sys.exit()
+
+                # s.pwe(self.logger,'fail to prepare drbd config file..')
+        print(f'  config file "{self.res_name}.res" created')
+        self.logger.write_to_log('T', 'INFO', 'info', 'finish', '',
+                                 f'      Create DRBD config file "{self.res_name}.res" done')
+        # [time],[transaction_id],[display],[INFO],[info],[finish],[d2],[data]
+        # self.logger.write_to_log('INFO','info','',f'Create DRBD config file "{self.res_name}.res" done')\
+
+    # def execute_drbd_cmd(self,unique_str,cmd):
+    #     now_id = consts.get_value('ID')
+    #     print(f'DB ID now is : {now_id}')
+    #     if _RPL == 'no':
+    #         print(cmd)
+    #         oprt_id = s.get_oprt_id()
+    #         self.logger.write_to_log('F', 'DATA', 'STR', unique_str, '', oprt_id)
+    #         self.logger.write_to_log('T', 'OPRT', 'cmd', 'ssh', oprt_id, cmd)
+    #         result_cmd = SSH.execute_command(cmd)
+    #         print(result_cmd)
+    #         self.logger.write_to_log('F', 'DATA', 'cmd', 'ssh', oprt_id, result_cmd)
+    #         if result_cmd['sts']:
+    #             return result_cmd['rst'].decode('utf-8')
+    #         else:
+    #             print('execute drbd init command failed')
+    #             sys.exit()
+    #     elif _RPL == 'yes':
+    #         db = logdb.LogDB()
+    #         db.get_logdb()
+    #         ww = db.find_oprt_id_via_string(_TID, unique_str)
+    #         db_id, oprt_id = ww
+    #         print(f'  DB ID go to: {db_id}')
+    #         print(f'  get opration ID: {oprt_id}')
+    #         result_cmd = db.get_cmd_result(oprt_id)
+    #         if result_cmd:
+    #             result_cmd = eval(result_cmd[0])
+    #             if result_cmd['sts']:
+    #                 result = result_cmd['rst'].decode('utf-8')
+    #             else:
+    #                 result = None
+    #                 print('execute drbd init command failed')
+    #         s.change_pointer(db_id)
+    #         print(f'  Change DB ID to: {db_id}')
+    #         return result
 
     def _drbd_init(self):
         '''
-        Initiakize DRBD resource
+        Initialize DRBD resource
         '''
+        oprt_id = s.get_oprt_id()
+        unique_str = 'usnkegs'
+        cmd = f'drbdadm create-md {self.res_name}'
 
-        init_cmd = f'drbdadm create-md {self.res_name}'
-        drbd_init = self.ssh.excute_command(init_cmd)
+        info_msg = f'      Initialize drbd for {self.res_name}'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', oprt_id, info_msg)
 
-        if drbd_init:
-            drbd_init = drbd_init.decode('utf-8')
-            re_drbd = re.compile(
-                'New drbd meta data block successfully created')
-            re_init = re_drbd.findall(drbd_init)
-            self.logger.write_to_log('VplxDrbd','regular_before','_drbd_init',drbd_init)
-            self.logger.write_to_log('VplxDrbd','regular_after','_drbd_init',re_init)
-            if re_init:
-                print(f'{self.res_name} initialize success')
-                self.logger.write_to_log('VplxDrbd','print','_drbd_init',(f'{self.res_name} initialize success'))
-                self.logger.write_to_log('VplxDrbd','return','_drbd_init',True)
-                return True
-            else:
-                self.logger.write_to_log('VplxDrbd','print','_drbd_init',(f'drbd resource {self.res_name} initialize failed'))
-                s.pe(f'drbd resource {self.res_name} initialize failed')
-
+        init_result = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        re_drbd = re.compile('New drbd meta data block successfully created')
+        re_init = re_drbd.findall(init_result)
+        # oprt_id = s.get_oprt_id()
+        # self.logger.write_to_log('T', 'OPRT', 'regular', 'findall', oprt_id, {'New drbd meta data block successfully created':drbd_init})
+        # self.logger.write_to_log('F', 'DATA', 'regular', 'findall', oprt_id, re_init)
+        if re_init:
+            print(f'  Resource "{self.res_name}" initialize successful')
+            return True
         else:
-            self.logger.write_to_log('VplxDrbd','print','_drbd_init',(f'drbd resource {self.res_name} initialize failed'))
-            s.pe(f'drbd resource {self.res_name} initialize failed')
+            s.pwe(self.logger, f'drbd resource {self.res_name} initialize failed')
 
     def _drbd_up(self):
         '''
         Start DRBD resource
         '''
-        up_cmd = f'drbdadm up {self.res_name}'
-        drbd_up = self.ssh.excute_command(up_cmd)
-        if drbd_up is True:
-            print(f'{self.res_name} up success')
-            self.logger.write_to_log('VplxDrbd','print','_drbd_up',(f'{self.res_name} up success'))
-            self.logger.write_to_log('VplxDrbd','return','_drbd_up',True)
+        oprt_id = s.get_oprt_id()
+        unique_str = 'elsflsnek'
+        cmd = f'drbdadm up {self.res_name}'
+        result = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        if result != None:
+            print(f'  Resource "{self.res_name}" bring up successful')
             return True
-        else:
-            self.logger.write_to_log('VplxDrbd','print','_drbd_up',(f'drbd resource {self.res_name} up failed'))
-            s.pe(f'drbd resource {self.res_name} up failed')
 
     def _drbd_primary(self):
         '''
         Complete initial synchronization of resources
         '''
-        primary_cmd = f'drbdadm primary --force {self.res_name}'
-        drbd_primary = self.ssh.excute_command(primary_cmd)
-        if drbd_primary is True:
-            print(f'{self.res_name} primary success')
-            self.logger.write_to_log('VplxDrbd','print','_drbd_primary',(f'{self.res_name} primary success'))
-            self.logger.write_to_log('VplxDrbd','print','_drbd_primary',True)
+        oprt_id = s.get_oprt_id()
+        unique_str = '7C4LU6Xr'
+        cmd = f'drbdadm primary --force {self.res_name}'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', '',
+                                 f'      Start to initial synchronization for {self.res_name}')
+        result = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        if result != None:
+            print(f'    {self.res_name} synchronize successfully')
+            self.logger.write_to_log('T', 'INFO', 'info', 'finish', '',
+                                     f'    {self.res_name} synchronize successfully')
             return True
         else:
-            self.logger.write_to_log('VplxDrbd','print','_drbd_primary',(f'drbd resource {self.res_name} primary failed'))
-            s.pe(f'drbd resource {self.res_name} primary failed')
+            s.pwe(self.logger, f'drbd resource {self.res_name} primary failed')
+        # drbd_primary = SSH.execute_command(primary_cmd)
+        # if drbd_primary['sts']:
+        #     print(f'{self.res_name} primary success')
+        #     self.logger.write_to_log('T', 'INFO', 'info', 'finish', '', f'      {self.res_name} synchronize successfully')
+        #     # self.logger.write_to_log('INFO','info','',(f'{self.res_name} primary success'))
+        #     return True
+        # else:
+        #     s.pwe(self.logger,f'drbd resource {self.res_name} primary failed')
 
     def drbd_cfg(self):
         if self._drbd_init():
             if self._drbd_up():
                 if self._drbd_primary():
-                    self.logger.write_to_log('VplxDrbd','return','drbd_cfg',True)
                     return True
 
     def drbd_status_verify(self):
         '''
         Check DRBD resource status and confirm the status is UpToDate
         '''
-        verify_cmd = f'drbdadm status {self.res_name}'
-        result = self.ssh.excute_command(verify_cmd)
+        oprt_id = s.get_oprt_id()
+        unique_str = 'By91GFxC'
+        cmd = f'drbdadm status {self.res_name}'
+
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', '', '      Start to check DRBD resource status')
+        result = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
         if result:
-            result = result.decode('utf-8')
             re_display = re.compile(r'''disk:(\w*)''')
             re_result = re_display.findall(result)
-            self.logger.write_to_log('VplxDrbd','regular_before','drbd_status_verify',result)
-            self.logger.write_to_log('VplxDrbd','regular_after','drbd_status_verify',re_result)
+            oprt_id = s.get_oprt_id()
+            self.logger.write_to_log('T', 'OPRT', 'regular', 'findall', oprt_id, result)
             if re_result:
                 status = re_result[0]
+                self.logger.write_to_log('F', 'DATA', 'regular', 'findall', oprt_id, status)
                 if status == 'UpToDate':
-                    print(f'{self.res_name} DRBD check successful')
-                    self.logger.write_to_log('VplxDrbd','print','drbd_status_verify',(f'{self.res_name} DRBD check successful'))
-                    self.logger.write_to_log('VplxDrbd','return','drbd_status_verify',True)
+                    print(f'    {self.res_name} DRBD check successfully')
+                    self.logger.write_to_log('T', 'INFO', 'info', 'finish', '',
+                                             f'    {self.res_name} DRBD check successfully')
+                    # self.logger.write_to_log('INFO','info','',(f'{self.res_name} DRBD check successful'))
                     return True
                 else:
-                    self.logger.write_to_log('VplxDrbd','print','drbd_status_verify',(f'{self.res_name} DRBD verification failed'))
-                    s.pe(f'{self.res_name} DRBD verification failed')
+                    s.pwe(self.logger, f'{self.res_name} DRBD verification failed')
             else:
-                self.logger.write_to_log('VplxDrbd', 'print', 'drbd_status_verify',
-                                         (f'{self.res_name} DRBD does not exist'))
-                s.pe(f'{self.res_name} DRBD does not exist')
+                s.pwe(self.logger, f'{self.res_name} DRBD does not exist')
 
 
-class VplxCrm(VplxDrbd):
-    def __init__(self, unique_id, unique_name,logger):
-        VplxDrbd.__init__(self, unique_id, unique_name,logger)
-        self.lu_name = self.res_name
+class VplxCrm(object):
+    def __init__(self, logger):
+        init_ssh(logger)
+        self.logger = logger
+        self._ID = consts.get_id()
+        self._STR = consts.get_str()
+        self._RPL = consts.get_rpl()
+        self.lu_name = f'res_{self._STR}_{self._ID}'  # same as drbd resource name
         self.colocation_name = f'co_{self.lu_name}'
-        self.target_iqn = target_iqn
-        self.initiator_iqn = initiator_iqn
-        self.target_name = target_name
         self.order_name = f'or_{self.lu_name}'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', '', f'  Start to configure crm resource {self.lu_name}')
+        # self.logger.write_to_log('INFO','info','',f'start to config crm resource {self.lu_name}') #
 
     def _crm_create(self):
         '''
         Create iSCSILogicalUnit resource
         '''
-        crm_create_cmd = f'crm conf primitive {self.lu_name} \
-            iSCSILogicalUnit params target_iqn="{self.target_iqn}" \
-            implementation=lio-t lun={self.id} path="/dev/{self.drbd_device_name}"\
-            allowed_initiators="{self.initiator_iqn}" op start timeout=40 interval=0 op stop timeout=40 interval=0 op monitor timeout=40 interval=50 meta target-role=Stopped'
-
-        if self.ssh.excute_command(crm_create_cmd) is True:
-            print('iscisi lun_create success')
-            self.logger.write_to_log('VplxCrm','print','_crm_create',('iscisi lun_create success'))
-            self.logger.write_to_log('VplxCrm','return','_crm_create',True)
+        oprt_id = s.get_oprt_id()
+        unique_str = 'LXYV7dft'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', oprt_id,
+                                 f'    Start to create iSCSILogicalUnit resource {self.lu_name}')
+        cmd = f'crm conf primitive {self.lu_name} \
+            iSCSILogicalUnit params target_iqn="{target_iqn}" \
+            implementation=lio-t lun={consts.get_id()} path="/dev/{DRBD_DEV_NAME}"\
+            allowed_initiators="{initiator_iqn}" op start timeout=40 interval=0 op stop timeout=40 interval=0 op monitor timeout=40 interval=50 meta target-role=Stopped'
+        result = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        if result != None:
+            print('    Create iSCSILogicalUnit successfully')
+            self.logger.write_to_log('T', 'INFO', 'info', 'finish', '', '    Create iSCSILogicalUnit successfully')
             return True
         else:
-            self.logger.write_to_log('VplxCrm','print','_crm_create',('iscisi lun_create failed'))
-            s.pe('iscisi lun_create failed')
+            s.pwe(self.logger, 'iscisi lun_create failed')
 
     def _setting_col(self):
         '''
         Setting up iSCSILogicalUnit resources of colocation
         '''
-        col_cmd = f'crm conf colocation {self.colocation_name} inf: {self.lu_name} {self.target_name}'
-        set_col = self.ssh.excute_command(col_cmd)
-        if set_col is True:
-            print('setting colocation successful')
-            self.logger.write_to_log('VplxCrm','print','_setting_col',('setting colocation successful'))
-            self.logger.write_to_log('VplxCrm','return','_setting_col',True)
+        oprt_id = s.get_oprt_id()
+        unique_str = 'E03YgRBd'
+        cmd = f'crm conf colocation {self.colocation_name} inf: {self.lu_name} {target_name}'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', oprt_id,
+                                 '      start to setting up iSCSILogicalUnit resources of colocation')
+        result_crm = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        if result_crm != None:
+            print('      Setting colocation successful')
+            self.logger.write_to_log('T', 'INFO', 'info', 'finish', '', '      Setting colocation successful')
             return True
         else:
-            self.logger.write_to_log('VplxCrm','print','_setting_col',('setting colocation failed'))
-            s.pe('setting colocation failed')
+            s.pwe(self.logger, 'setting colocation failed')
 
     def _setting_order(self):
         '''
         Setting up iSCSILogicalUnit resources of order
         '''
-        order_cmd = f'crm conf order {self.order_name} {self.target_name} {self.lu_name}'
-        set_order = self.ssh.excute_command(order_cmd)
-        if set_order is True:
-            print('setting order succeed')
-            self.logger.write_to_log('VplxCrm','print','_setting_order',('setting order succeed'))
-            self.logger.write_to_log('VplxCrm','return','_setting_order',True)
+        oprt_id = s.get_oprt_id()
+        unique_str = '0GHI63jX'
+        cmd = f'crm conf order {self.order_name} {target_name} {self.lu_name}'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', oprt_id,
+                                 '      Start to setting up iSCSILogicalUnit resources of order')
+        result_crm = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        if result_crm != None:
+            print('      Setting order succeed')
+            self.logger.write_to_log('T', 'INFO', 'info', 'finish', '', '      Setting order succeed')
             return True
         else:
-            s.pe('setting order failed')
+            s.pwe(self.logger, 'setting order failed')
 
     def _crm_setting(self):
         if self._setting_col():
             if self._setting_order():
-                self.logger.write_to_log('VplxCrm', 'return', '_setting_col', True)
                 return True
 
     def _crm_start(self):
         '''
         start the iSCSILogicalUnit resource
         '''
-        crm_start_cmd = f'crm res start {self.lu_name}'
-        crm_start = self.ssh.excute_command(crm_start_cmd)
-        if crm_start is True:
-            print('iscsi lun start successful')
-            self.logger.write_to_log('VplxCrm','print','_crm_start',('iscsi lun start successful'))
-            self.logger.write_to_log('VplxCrm','return','_crm_start',True)
+        oprt_id = s.get_oprt_id()
+        unique_str = 'YnTDsuVX'
+        cmd = f'crm res start {self.lu_name}'
+        self.logger.write_to_log('T', 'INFO', 'info', 'start', oprt_id,
+                                 f'      Start the iSCSILogicalUnit resource {self.lu_name}')
+        result_cmd = get_ssh_cmd(self.logger, unique_str, cmd, oprt_id)
+        if result_cmd != None:
+            print('      ISCSI LUN start successful')
+            self.logger.write_to_log('T', 'INFO', 'info', 'finish', '', '      ISCSI LUN start successful')
             return True
         else:
-            self.logger.write_to_log('VplxCrm','print','_crm_start',('iscsi lun start failed'))
-            s.pe('iscsi lun start failed')
+            s.pwe(self.logger, 'iscsi lun start failed')
 
     def crm_cfg(self):
         if self._crm_create():
             if self._crm_setting():
                 if self._crm_start():
-                    self.logger.write_to_log('VplxCrm', 'return', 'crm_cfg', True)
                     return True
 
     def crm_verify(self):
         pass
-
 
 # if __name__ == '__main__':
 #     test_crm = VplxCrm('72', 'luntest')
